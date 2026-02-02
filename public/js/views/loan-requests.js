@@ -138,6 +138,37 @@ function showRequestModal() {
               <label class="form-label">Notas</label>
               <textarea id="notes" class="form-textarea"></textarea>
             </div>
+
+            <div style="background: var(--bg-tertiary); padding: 15px; border-radius: 8px; margin-top: 20px;">
+                <h3 style="font-size: 1rem; margin-bottom: 10px; color: var(--text-primary);">🧑‍🤝‍🧑 Información del Aval / Co-deudor (Opcional)</h3>
+                
+                <div class="grid grid-2">
+                    <div class="form-group">
+                        <label class="form-label">Nombre Completo</label>
+                        <input type="text" id="guarantor_name" class="form-input" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Cédula / ID</label>
+                        <input type="text" id="guarantor_id_number" class="form-input" />
+                    </div>
+                </div>
+
+                <div class="grid grid-2">
+                    <div class="form-group">
+                        <label class="form-label">Teléfono</label>
+                        <input type="tel" id="guarantor_phone" class="form-input" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Parentesco/Relación</label>
+                        <input type="text" id="guarantor_relationship" class="form-input" placeholder="Ej. Hermano, Amigo" />
+                    </div>
+                </div>
+
+                <div class="form-group mb-0">
+                    <label class="form-label">Dirección</label>
+                    <input type="text" id="guarantor_address" class="form-input" />
+                </div>
+            </div>
           </form>
         </div>
         <div class="modal-footer">
@@ -176,7 +207,12 @@ async function saveRequest() {
     credit_type_id: parseInt(document.getElementById('credit_type_id').value),
     requested_amount: parseFloat(document.getElementById('requested_amount').value),
     requested_term: parseInt(document.getElementById('requested_term').value),
-    notes: document.getElementById('notes').value
+    notes: document.getElementById('notes').value,
+    guarantor_name: document.getElementById('guarantor_name').value,
+    guarantor_id_number: document.getElementById('guarantor_id_number').value,
+    guarantor_phone: document.getElementById('guarantor_phone').value,
+    guarantor_address: document.getElementById('guarantor_address').value,
+    guarantor_relationship: document.getElementById('guarantor_relationship').value
   };
 
   try {

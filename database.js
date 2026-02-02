@@ -100,6 +100,11 @@ async function initDatabase() {
         requested_term INTEGER NOT NULL,
         status TEXT DEFAULT 'pending',
         notes TEXT,
+        guarantor_name TEXT,
+        guarantor_id_number TEXT,
+        guarantor_phone TEXT,
+        guarantor_address TEXT,
+        guarantor_relationship TEXT,
         reviewed_by INTEGER,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
@@ -116,6 +121,11 @@ async function initDatabase() {
         status TEXT DEFAULT 'active',
         approved_date DATE,
         first_payment_date DATE,
+        guarantor_name TEXT,
+        guarantor_id_number TEXT,
+        guarantor_phone TEXT,
+        guarantor_address TEXT,
+        guarantor_relationship TEXT,
         approved_by INTEGER,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )

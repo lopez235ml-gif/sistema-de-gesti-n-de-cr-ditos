@@ -213,15 +213,24 @@ router.post('/:id/refinance', (req, res) => {
         const creditType = get('SELECT * FROM credit_types WHERE id = ?', [finalCreditTypeId]);
 
         const resultNewLoan = run(`
-            INSERT INTO loans (client_id, credit_type_id, amount, interest_rate, term_months, status, approved_date, first_payment_date, approved_by)
-            VALUES (?, ?, ?, ?, ?, 'active', DATE('now'), DATE('now', '+1 month'), ?)
+            INSERT INTO loans (
+                client_id, credit_type_id, amount, interest_rate, term_months, 
+                status, approved_date, first_payment_date, approved_by,
+                guarantor_name, guarantor_id_number, guarantor_phone, guarantor_address, guarantor_relationship
+            )
+            VALUES (?, ?, ?, ?, ?, 'active', DATE('now'), DATE('now', '+1 month'), ?, ?, ?, ?, ?, ?)
         `, [
             oldLoan.client_id,
             finalCreditTypeId,
             new_amount,
             creditType.interest_rate,
             new_term,
-            req.user.id // Asumiendo user adjunto por auth middleware
+            req.user.id,
+            oldLoan.guarantor_name,
+            oldLoan.guarantor_id_number,
+            oldLoan.guarantor_phone,
+            oldLoan.guarantor_address,
+            oldLoan.guarantor_relationship
         ]);
 
         const newLoanId = resultNewLoan.lastInsertRowid;

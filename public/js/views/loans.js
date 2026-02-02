@@ -221,6 +221,34 @@ async function viewLoanDetails(id) {
             </div>
 
             <h3 style="font-size: var(--font-size-lg); margin-bottom: var(--spacing-md);">Tabla de Amortización</h3>
+            ${loan.guarantor_name ? `
+              <div class="card p-3 mb-4" style="border: 1px solid var(--border-color); background: var(--bg-tertiary);">
+                  <h3 style="font-size: 1rem; margin-bottom: 10px; color: var(--text-primary);">🧑‍🤝‍🧑 Aval / Co-deudor</h3>
+                  <div class="grid grid-2">
+                      <div>
+                          <small class="text-muted">Nombre</small>
+                          <p class="font-bold">${loan.guarantor_name}</p>
+                      </div>
+                      <div>
+                          <small class="text-muted">ID / Cédula</small>
+                          <p>${loan.guarantor_id_number || '-'}</p>
+                      </div>
+                      <div>
+                          <small class="text-muted">Teléfono</small>
+                          <p>${loan.guarantor_phone || '-'}</p>
+                      </div>
+                      <div>
+                          <small class="text-muted">Relación</small>
+                          <p>${loan.guarantor_relationship || '-'}</p>
+                      </div>
+                  </div>
+                  <div class="mt-2">
+                       <small class="text-muted">Dirección</small>
+                       <p>${loan.guarantor_address || '-'}</p>
+                  </div>
+              </div>
+              <h3 style="font-size: var(--font-size-lg); margin-bottom: var(--spacing-md);">Tabla de Amortización</h3>
+            ` : ''}
             <div class="table-container">
               <table class="table">
                 <thead>

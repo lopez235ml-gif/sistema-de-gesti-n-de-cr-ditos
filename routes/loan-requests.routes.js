@@ -66,7 +66,9 @@ router.get('/:id', (req, res) => {
 // Crear nueva solicitud
 router.post('/', (req, res) => {
     try {
-        const { client_id, credit_type_id, requested_amount, requested_term, notes } = req.body;
+        const { client_id, credit_type_id, requested_amount, requested_term, notes,
+            guarantor_name, guarantor_id_number, guarantor_phone, guarantor_address, guarantor_relationship
+        } = req.body;
 
         if (!client_id || !credit_type_id || !requested_amount || !requested_term) {
             return res.status(400).json({ error: 'Todos los campos son requeridos' });
@@ -92,17 +94,22 @@ router.post('/', (req, res) => {
         }
 
         const result = run(`
-      INSERT INTO loan_requests (client_id, credit_type_id, requested_amount, requested_term, notes)
-      VALUES (?, ?, ?, ?, ?)
-    `, [client_id, credit_type_id, requested_amount, requested_term, notes || null]);
+            INSERT INTO loan_requests (
+                client_id, credit_type_id, requested_amount, requested_term, notes,
+                guarantor_name, guarantor_id_number, guarantor_phone, guarantor_address, guarantor_relationship
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+            client_id, credit_type_id, requested_amount, requested_term, notes || null,
+            guarantor_name || null, guarantor_id_number || null, guarantor_phone || null, guarantor_address || null, guarantor_relationship || null
+        ]);
 
         const newRequest = get(`
-      SELECT lr.*, c.full_name as client_name, ct.name as credit_type_name
-      FROM loan_requests lr
-      JOIN clients c ON lr.client_id = c.id
-      JOIN credit_types ct ON lr.credit_type_id = ct.id
-      WHERE lr.id = ?
-    `, [result.lastInsertRowid]);
+            SELECT lr.*, c.full_name as client_name, ct.name as credit_type_name
+            FROM loan_requests lr
+            JOIN clients c ON lr.client_id = c.id
+            JOIN credit_types ct ON lr.credit_type_id = ct.id
+            WHERE lr.id = ?
+        `, [result.lastInsertRowid]);
 
         res.status(201).json(newRequest);
     } catch (error) {
@@ -141,17 +148,25 @@ router.put('/:id/approve', (req, res) => {
 
         // Crear préstamo
         const loanResult = run(`
-      INSERT INTO loans (client_id, credit_type_id, amount, interest_rate, term_months, 
-                        approved_date, first_payment_date, approved_by)
-      VALUES (?, ?, ?, ?, ?, DATE('now'), ?, ?)
-    `, [
+            INSERT INTO loans (
+                client_id, credit_type_id, amount, interest_rate, term_months, 
+                approved_date, first_payment_date, approved_by,
+                guarantor_name, guarantor_id_number, guarantor_phone, guarantor_address, guarantor_relationship
+            )
+            VALUES (?, ?, ?, ?, ?, DATE('now'), ?, ?, ?, ?, ?, ?, ?)
+        `, [
             request.client_id,
             request.credit_type_id,
             request.requested_amount,
             creditType.interest_rate,
             request.requested_term,
             first_payment_date,
-            req.user.id
+            req.user.id,
+            request.guarantor_name,
+            request.guarantor_id_number,
+            request.guarantor_phone,
+            request.guarantor_address,
+            request.guarantor_relationship
         ]);
 
         const newLoan = get(`
