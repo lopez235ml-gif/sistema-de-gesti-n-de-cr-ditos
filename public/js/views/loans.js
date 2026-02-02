@@ -342,11 +342,11 @@ async function showRefinanceModal(loanId) {
                         </div>
 
                         <div class="grid grid-2 mb-4">
-                            <div class="card p-3" style="border: 1px solid var(--border-color);">
+                            <div class="card p-3" style="border: 1px solid var(--border-color); background: var(--bg-secondary);">
                                 <small class="text-muted">Deuda Actual a Liquidar</small>
                                 <h3 class="text-danger">$${loan.balance.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</h3>
                             </div>
-                            <div class="card p-3" style="border: 1px solid var(--border-color); background: #f0fdf4;">
+                            <div class="card p-3" style="border: 1px solid var(--border-color); background: rgba(16, 185, 129, 0.1);">
                                 <small class="text-muted">Efectivo a Entregar</small>
                                 <h3 class="text-success" id="cashToClient">$0.00</h3>
                             </div>
