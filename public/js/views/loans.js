@@ -125,7 +125,12 @@ function renderLoansTable(loans) {
       </td>
       <td>${new Date(loan.approved_date).toLocaleDateString('es-ES')}</td>
       <td>
-        <button class="btn btn-sm btn-primary" onclick="viewLoanDetails(${loan.id})">Ver Detalle</button>
+        <div style="display: flex; gap: 5px;">
+           <button class="btn btn-sm btn-primary" onclick="viewLoanDetails(${loan.id})">Ver</button>
+           ${loan.status === 'active' ?
+      `<button class="btn btn-sm btn-outline" onclick="showRefinanceModal(${loan.id})" title="Renovar Préstamo">Renovar</button>`
+      : ''}
+        </div>
       </td>
     </tr>
   `).join('');
@@ -305,4 +310,145 @@ function closeLoanDetailModal(event) {
 
 function initLoans() {
   // Inicialización si es necesaria
+}
+
+// ==========================================
+// Lógica de Refinanciamiento / Renovación
+// ==========================================
+
+let currentRefinanceLoan = null;
+
+async function showRefinanceModal(loanId) {
+  try {
+    const loan = await loansAPI.getById(loanId);
+    currentRefinanceLoan = loan;
+
+    const modal = document.getElementById('loanDetailModal'); // Reutilizamos contenedor
+
+    // Calcular defaults
+    const minAmount = Math.ceil(loan.balance) + 1;
+
+    modal.innerHTML = `
+            <div class="modal-overlay" onclick="closeLoanDetailModal(event)">
+                <div class="modal" onclick="event.stopPropagation()">
+                    <div class="modal-header">
+                        <h2 class="modal-title">Renovar Préstamo #${loan.id}</h2>
+                        <button class="btn btn-sm" onclick="closeLoanDetailModal()">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-info mb-4" style="background: var(--bg-tertiary); padding: 10px; border-radius: 4px;">
+                            <p class="mb-1"><strong>Cliente:</strong> ${loan.client_name}</p>
+                            <p class="mb-0">Esta acción liquidará el préstamo actual y creará uno nuevo.</p>
+                        </div>
+
+                        <div class="grid grid-2 mb-4">
+                            <div class="card p-3" style="border: 1px solid var(--border-color);">
+                                <small class="text-muted">Deuda Actual a Liquidar</small>
+                                <h3 class="text-danger">$${loan.balance.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</h3>
+                            </div>
+                            <div class="card p-3" style="border: 1px solid var(--border-color); background: #f0fdf4;">
+                                <small class="text-muted">Efectivo a Entregar</small>
+                                <h3 class="text-success" id="cashToClient">$0.00</h3>
+                            </div>
+                        </div>
+
+                        <form id="refinanceForm" onsubmit="event.preventDefault(); processRefinance();">
+                            <div class="form-group">
+                                <label class="form-label">Nuevo Monto del Préstamo</label>
+                                <input type="number" id="newAmount" class="form-input" 
+                                    min="${minAmount}" step="0.01" required 
+                                    placeholder="Mínimo $${minAmount}"
+                                    oninput="calculateRefinanceCash()">
+                                <small class="text-muted">Debe ser mayor a la deuda actual ($${loan.balance.toFixed(2)})</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Nuevo Plazo (Meses)</label>
+                                <select id="newTerm" class="form-select" required>
+                                    ${[6, 12, 18, 24, 36, 48].map(m =>
+      `<option value="${m}" ${m === loan.term_months ? 'selected' : ''}>${m} meses</option>`
+    ).join('')}
+                                </select>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-outline" onclick="closeLoanDetailModal()">Cancelar</button>
+                        <button class="btn btn-primary" onclick="processRefinance()">Confirmar Renovación</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+    modal.style.display = 'block';
+    calculateRefinanceCash(); // Inicializar
+
+  } catch (error) {
+    alert('Error cargando información: ' + error.message);
+  }
+}
+
+function calculateRefinanceCash() {
+  if (!currentRefinanceLoan) return;
+
+  const newAmount = parseFloat(document.getElementById('newAmount').value) || 0;
+  const balance = currentRefinanceLoan.balance;
+  const cash = newAmount - balance;
+
+  const cashElement = document.getElementById('cashToClient');
+
+  if (cash > 0) {
+    cashElement.textContent = '$' + cash.toLocaleString('es-ES', { minimumFractionDigits: 2 });
+    cashElement.classList.remove('text-danger');
+    cashElement.classList.add('text-success');
+  } else {
+    cashElement.textContent = 'Monto insuficiente';
+    cashElement.classList.remove('text-success');
+    cashElement.classList.add('text-danger');
+  }
+}
+
+async function processRefinance() {
+  if (!currentRefinanceLoan) return;
+
+  const newAmount = parseFloat(document.getElementById('newAmount').value);
+  const newTerm = parseInt(document.getElementById('newTerm').value);
+
+  if (!newAmount || newAmount <= currentRefinanceLoan.balance) {
+    alert('El nuevo monto debe ser mayor al saldo actual para cubrir la deuda.');
+    return;
+  }
+
+  if (!confirm(`¿Estás seguro de renovar este préstamo?\n\nSe liquidará la deuda de $${currentRefinanceLoan.balance.toFixed(2)} y se entregará $${(newAmount - currentRefinanceLoan.balance).toFixed(2)} al cliente.`)) {
+    return;
+  }
+
+  try {
+    const token = localStorage.getItem('token');
+    const response = await fetch(`/api/loans/${currentRefinanceLoan.id}/refinance`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        new_amount: newAmount,
+        new_term: newTerm
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) throw new Error(data.error || 'Error al renovar');
+
+    alert(`¡Renovación Exitosa!\n\nEntregar al cliente: $${data.cash_to_client.toLocaleString('es-ES', { minimumFractionDigits: 2 })}`);
+
+    closeLoanDetailModal();
+    renderLoans().then(html => {
+      document.getElementById('main-content').innerHTML = html;
+    });
+
+  } catch (error) {
+    alert('Error: ' + error.message);
+  }
 }
