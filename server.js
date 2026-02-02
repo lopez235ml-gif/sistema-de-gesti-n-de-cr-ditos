@@ -64,6 +64,8 @@ async function startServer() {
         });
     } catch (error) {
         console.error('Error iniciando servidor:', error);
+        const fs = require('fs');
+        fs.writeFileSync('startup_error.txt', error.toString() + '\\n' + (error.stack || ''));
         process.exit(1);
     }
 }

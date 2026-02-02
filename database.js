@@ -1,26 +1,16 @@
-const initSqlJs = require('sql.js');
+const Database = require('better-sqlite3');
 const bcrypt = require('bcrypt');
 const fs = require('fs');
 const path = require('path');
 
 const dbPath = path.join(__dirname, 'database.db');
 let db;
-let SQL;
 
-// Helper para ejecutar queries
+// Helper para ejecutar queries (Simulado para compatibilidad con código anterior)
 function query(sql, params = []) {
   try {
     const stmt = db.prepare(sql);
-    stmt.bind(params);
-
-    const results = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject();
-      results.push(row);
-    }
-    stmt.free();
-
-    return results;
+    return stmt.all(params);
   } catch (error) {
     console.error('Error en query:', error);
     throw error;
@@ -29,52 +19,41 @@ function query(sql, params = []) {
 
 // Helper para obtener un solo resultado
 function get(sql, params = []) {
-  const results = query(sql, params);
-  return results[0] || null;
+  try {
+    const stmt = db.prepare(sql);
+    return stmt.get(params);
+  } catch (error) {
+    console.error('Error en get:', error);
+    throw error;
+  }
 }
 
 // Helper para ejecutar comandos (INSERT, UPDATE, DELETE)
 function run(sql, params = []) {
   try {
-    db.run(sql, params);
-    // IMPORTANTE: Obtener ID antes de guardar/exportar, ya que db.export() puede resetear el estado
-    const id = db.exec("SELECT last_insert_rowid() as id")[0].values[0][0];
-    saveDatabase();
-    return { changes: 1, lastInsertRowid: id };
+    const stmt = db.prepare(sql);
+    const info = stmt.run(params);
+    return { changes: info.changes, lastInsertRowid: info.lastInsertRowid };
   } catch (error) {
     console.error('Error en run:', error);
     throw error;
   }
 }
 
-// Guardar cambios en disco
+// Guardar cambios en disco (No necesario con better-sqlite3, es automático)
 function saveDatabase() {
-  try {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    fs.writeFileSync(dbPath, buffer);
-  } catch (error) {
-    console.error('Error guardando base de datos:', error);
-  }
+  // No-op para compatibilidad
 }
 
 // Inicializar base de datos
 async function initDatabase() {
   try {
-    SQL = await initSqlJs();
-
-    // Cargar base de datos existente o crear nueva
-    if (fs.existsSync(dbPath)) {
-      const buffer = fs.readFileSync(dbPath);
-      db = new SQL.Database(buffer);
-      console.log('✓ Base de datos cargada');
-    } else {
-      db = new SQL.Database();
-      console.log('✓ Nueva base de datos creada');
-    }
+    // Abrir base de datos
+    db = new Database(dbPath, { verbose: console.log });
+    console.log('✓ Base de datos conectada (better-sqlite3)');
 
     // Crear tablas
-    db.run(`
+    db.exec(`
       CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
@@ -84,7 +63,7 @@ async function initDatabase() {
       )
     `);
 
-    db.run(`
+    db.exec(`
       CREATE TABLE IF NOT EXISTS clients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         full_name TEXT NOT NULL,
@@ -97,7 +76,7 @@ async function initDatabase() {
       )
     `);
 
-    db.run(`
+    db.exec(`
       CREATE TABLE IF NOT EXISTS credit_types (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -112,7 +91,7 @@ async function initDatabase() {
       )
     `);
 
-    db.run(`
+    db.exec(`
       CREATE TABLE IF NOT EXISTS loan_requests (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         client_id INTEGER NOT NULL,
@@ -126,7 +105,7 @@ async function initDatabase() {
       )
     `);
 
-    db.run(`
+    db.exec(`
       CREATE TABLE IF NOT EXISTS loans (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         client_id INTEGER NOT NULL,
@@ -142,7 +121,8 @@ async function initDatabase() {
       )
     `);
 
-    db.run(`
+    // 5. Pagos
+    db.exec(`
       CREATE TABLE IF NOT EXISTS payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         loan_id INTEGER NOT NULL,
@@ -159,7 +139,8 @@ async function initDatabase() {
     `);
 
     // 6. Tabla de configuración
-    db.run(`
+    // 6. Tabla de configuración
+    db.exec(`
       CREATE TABLE IF NOT EXISTS settings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         key TEXT UNIQUE NOT NULL,
@@ -169,7 +150,8 @@ async function initDatabase() {
     `);
 
     // 7. Tabla de Gastos
-    db.run(`
+    // 7. Tabla de Gastos
+    db.exec(`
       CREATE TABLE IF NOT EXISTS expenses (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         description TEXT NOT NULL,
@@ -182,7 +164,8 @@ async function initDatabase() {
     `);
 
     // 8. Tabla de Documentos
-    db.run(`
+    // 8. Tabla de Documentos
+    db.exec(`
       CREATE TABLE IF NOT EXISTS documents (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         client_id INTEGER NOT NULL,
