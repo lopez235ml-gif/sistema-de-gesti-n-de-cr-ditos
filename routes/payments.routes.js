@@ -42,6 +42,13 @@ router.get('/', (req, res) => {
             sql += ' WHERE ' + conditions.join(' AND ');
         }
 
+        const { search } = req.query;
+        if (search) {
+            sql += conditions.length > 0 ? ' AND ' : ' WHERE ';
+            sql += 'c.full_name LIKE ?';
+            params.push(`%${search}%`);
+        }
+
         sql += ' ORDER BY p.payment_date DESC';
 
         const payments = query(sql, params);

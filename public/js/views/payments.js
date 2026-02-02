@@ -3,10 +3,11 @@
 let activeLoansForPayment = [];
 let overdueLoans = [];
 
-async function renderPayments() {
+async function renderPayments(filters = {}) {
   try {
+    const searchParams = new URLSearchParams(filters);
     const [payments, overdue, loans] = await Promise.all([
-      paymentsAPI.getAll(),
+      paymentsAPI.getAll(filters),
       paymentsAPI.getOverdue(),
       loansAPI.getAll({ status: 'active' })
     ]);
@@ -19,6 +20,14 @@ async function renderPayments() {
         <div class="flex-between mb-4">
           <h1 style="font-size: var(--font-size-3xl); font-weight: 700;">Pagos y Cobranzas</h1>
           <button class="btn btn-primary" onclick="showPaymentModal()">+ Registrar Pago</button>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-body">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <input type="text" id="paymentSearch" class="form-input" placeholder="🔍 Buscar pago por nombre de cliente..." onkeyup="handlePaymentSearch(event)" value="${filters.search || ''}">
+                </div>
+            </div>
         </div>
 
         ${overdueLoans.length > 0 ? `
@@ -330,4 +339,34 @@ function sendWhatsAppNotification(clientName, phone, amount, receiptNumber) {
 
 function initPayments() {
   // Inicialización si es necesaria
+}
+
+let searchTimeout;
+function handlePaymentSearch(event) {
+  const query = event.target.value;
+
+  // Si presiona Enter
+  if (event.key === 'Enter') {
+    clearTimeout(searchTimeout);
+    renderPayments({ search: query }).then(html => {
+      document.getElementById('main-content').innerHTML = html;
+      // Restaurar el foco y el cursor
+      const input = document.getElementById('paymentSearch');
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+    return;
+  }
+
+  // Debounce para búsqueda automática al escribir
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => {
+    renderPayments({ search: query }).then(html => {
+      document.getElementById('main-content').innerHTML = html;
+      // Restaurar el foco y el cursor
+      const input = document.getElementById('paymentSearch');
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+  }, 500);
 }
