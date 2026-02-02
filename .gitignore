@@ -1,0 +1,24 @@
+# Node modules
+node_modules/
+npm-debug.log
+
+# Environment variables
+.env
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Database (Optional: Incluir para el primer deploy si se quiere demo data, luego mejor ignorar)
+# database.db 
+# Comentado arriba: Permitimos subirlo esta vez para que el usuario tenga su data de ejemplo.
+# En un escenario real profesional, esto NUNCA se sube.
+
+# Uploads (Ignorar archivos subidos localmente, excepto gitkeep si existiera)
+# public/uploads/
