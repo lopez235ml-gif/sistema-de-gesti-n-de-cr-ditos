@@ -45,10 +45,7 @@ function renderLogin() {
           </div>
         </form>
         
-        <div class="mt-3 text-center" style="color: var(--text-muted); font-size: var(--font-size-sm);">
-          <p>Credenciales por defecto:</p>
-          <p><strong>Usuario:</strong> admin | <strong>Contraseña:</strong> Admin123!</p>
-        </div>
+
       </div>
     </div>
   `;

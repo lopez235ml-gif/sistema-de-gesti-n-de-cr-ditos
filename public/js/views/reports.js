@@ -26,7 +26,10 @@ async function exportReport(type) {
       }
     });
 
-    if (!response.ok) throw new Error('Error descargando reporte');
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Error descargando reporte');
+    }
 
     // Manejar la descarga del blob
     const blob = await response.blob();
