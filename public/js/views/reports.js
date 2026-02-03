@@ -2,6 +2,67 @@
 
 let currentPeriod = 'month';
 
+async function exportReport(type) {
+  try {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      window.location.href = '/index.html';
+      return;
+    }
+
+    let url = `/api/reports/export/${type}`;
+
+    // Parametros adicionales
+    // Parametros adicionales
+    if (type === 'collections') {
+      // Usar la variable global currentPeriod o el filtro principal
+      url += `?period=${currentPeriod}`;
+    }
+
+    // Usamos fetch para poder pasar el header de Autenticación
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok) throw new Error('Error descargando reporte');
+
+    // Manejar la descarga del blob
+    const blob = await response.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+
+    // Intentar obtener nombre del archivo del header
+    const disposition = response.headers.get('Content-Disposition');
+    let filename = `reporte_${type}.csv`;
+    if (disposition && disposition.indexOf('attachment') !== -1) {
+      const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+      const matches = filenameRegex.exec(disposition);
+      if (matches != null && matches[1]) {
+        filename = matches[1].replace(/['"]/g, '');
+      }
+    }
+
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+
+  } catch (error) {
+    alert('Error exportando: ' + error.message);
+  }
+}
+
+function initReports() {
+  loadPortfolioSummary();
+  loadCollectionMetrics();
+  loadInterestAnalysis();
+  loadOverdueAnalysis();
+}
+
 async function renderReports() {
   try {
     const [portfolio, collections, interest, overdue] = await Promise.all([
@@ -103,6 +164,7 @@ async function renderReports() {
         <div class="card mb-4">
           <div class="card-header">
             <h2 class="card-title">Cobros del Periodo (${getPeriodLabel(currentPeriod)})</h2>
+            <button class="btn btn-sm btn-outline" onclick="exportReport('collections')" title="Descargar Excel">📥 Exportar</button>
           </div>
           <div class="card-body">
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--spacing-lg); margin-bottom: var(--spacing-lg);">
@@ -139,6 +201,7 @@ async function renderReports() {
           <div class="card mb-4" style="border: 2px solid var(--danger);">
             <div class="card-header">
               <h2 class="card-title" style="color: var(--danger);">⚠️ Análisis de Cartera Vencida</h2>
+              <button class="btn btn-sm btn-outline" style="border-color: var(--danger); color: var(--danger);" onclick="exportReport('overdue')" title="Descargar Excel">📥 Exportar</button>
             </div>
             <div class="card-body">
               <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--spacing-lg); margin-bottom: var(--spacing-lg);">
@@ -201,6 +264,7 @@ async function renderReports() {
         <div class="card">
           <div class="card-header">
             <h2 class="card-title">Resumen de Cartera</h2>
+            <button class="btn btn-sm btn-outline" onclick="exportReport('active-portfolio')" title="Descargar Excel">📥 Exportar</button>
           </div>
           <div class="card-body">
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: var(--spacing-lg);">

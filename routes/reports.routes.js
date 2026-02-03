@@ -309,4 +309,181 @@ router.get('/daily-collections', (req, res) => {
     }
 });
 
+// ==========================================
+// Rutas de Exportación (Excel/CSV)
+// ==========================================
+const { convertToCSV } = require('../utils/csv-exporter');
+
+// Exportar Cobranza (Pagos)
+router.get('/export/collections', (req, res) => {
+    try {
+        const { period = 'month' } = req.query;
+        let startDate, endDate;
+        const today = new Date();
+
+        // Reutilizar lógica de fechas (simplificada)
+        if (period === 'today') {
+            startDate = endDate = today.toISOString().split('T')[0];
+        } else if (period === 'week') {
+            const weekStart = new Date(today);
+            weekStart.setDate(today.getDate() - today.getDay());
+            startDate = weekStart.toISOString().split('T')[0];
+            endDate = today.toISOString().split('T')[0];
+        } else { // default month
+            startDate = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+            endDate = today.toISOString().split('T')[0];
+        }
+
+        const payments = query(`
+            SELECT 
+                p.id, p.payment_date, p.amount, p.principal, p.interest, p.late_fee, p.receipt_number,
+                c.full_name as client_name,
+                ct.name as credit_type
+            FROM payments p
+            JOIN loans l ON p.loan_id = l.id
+            JOIN clients c ON l.client_id = c.id
+            JOIN credit_types ct ON l.credit_type_id = ct.id
+            WHERE p.payment_date BETWEEN ? AND ?
+            ORDER BY p.payment_date DESC
+        `, [startDate, endDate]);
+
+        const columns = [
+            { key: 'payment_date', header: 'Fecha', format: 'date' },
+            { key: 'receipt_number', header: 'Recibo' },
+            { key: 'client_name', header: 'Cliente' },
+            { key: 'credit_type', header: 'Tipo Crédito' },
+            { key: 'amount', header: 'Total Pagado', format: 'currency' },
+            { key: 'principal', header: 'Capital', format: 'currency' },
+            { key: 'interest', header: 'Interés', format: 'currency' },
+            { key: 'late_fee', header: 'Mora', format: 'currency' }
+        ];
+
+        const csv = convertToCSV(payments, columns);
+        res.header('Content-Type', 'text/csv');
+        res.header('Content-Disposition', `attachment; filename=cobranza_${period}_${startDate}.csv`);
+        res.send(csv);
+
+    } catch (error) {
+        console.error('Error exportando cobranza:', error);
+        res.status(500).send('Error generando reporte');
+    }
+});
+
+// Exportar Cartera Activa
+router.get('/export/active-portfolio', (req, res) => {
+    try {
+        const loans = query(`
+            SELECT 
+                l.id, l.amount, l.interest_rate, l.term_months, l.approved_date, l.first_payment_date, l.status,
+                c.full_name as client_name, c.id_number,
+                ct.name as credit_type,
+                (l.amount - COALESCE((SELECT SUM(principal) FROM payments WHERE loan_id = l.id), 0)) as balance
+            FROM loans l
+            JOIN clients c ON l.client_id = c.id
+            JOIN credit_types ct ON l.credit_type_id = ct.id
+            WHERE l.status = 'active'
+            ORDER BY l.approved_date DESC
+        `);
+
+        const columns = [
+            { key: 'id', header: 'ID Préstamo' },
+            { key: 'client_name', header: 'Cliente' },
+            { key: 'id_number', header: 'Cédula/ID' },
+            { key: 'credit_type', header: 'Tipo' },
+            { key: 'amount', header: 'Monto Original', format: 'currency' },
+            { key: 'balance', header: 'Saldo Pendiente', format: 'currency' },
+            { key: 'interest_rate', header: 'Tasa %' },
+            { key: 'term_months', header: 'Plazo (Meses)' },
+            { key: 'approved_date', header: 'Fecha Inicio', format: 'date' },
+            { key: 'first_payment_date', header: 'Primer Pago', format: 'date' }
+        ];
+
+        const csv = convertToCSV(loans, columns);
+        res.header('Content-Type', 'text/csv');
+        res.header('Content-Disposition', `attachment; filename=cartera_activa_${new Date().toISOString().split('T')[0]}.csv`);
+        res.send(csv);
+
+    } catch (error) {
+        console.error('Error exportando cartera:', error);
+        res.status(500).send('Error generando reporte');
+    }
+});
+
+// Exportar Mora
+router.get('/export/overdue', (req, res) => {
+    try {
+        // ... (Logica simplificada de mora para exportación)
+        // Reutilizamos la query, pero filtrando en código o SQL complejo.
+        // Para eficiencia en export, hagamos una query directa de quienes deben hoy.
+        // Aproximación: préstamos activos donde (hoy > first_payment + payments_made * frequency)
+        // Por simplicidad y consistencia, usaremos la misma lógica que el endpoint de JSON pero adaptada.
+
+        const overdueLoans = query(`
+            SELECT 
+                l.id, l.amount, l.first_payment_date, l.term_months,
+                c.full_name as client_name, c.phone,
+                ct.name as credit_type,
+                COALESCE(SUM(p.principal), 0) as paid_principal,
+                COUNT(p.id) as actual_payments
+            FROM loans l
+            JOIN clients c ON l.client_id = c.id
+            JOIN credit_types ct ON l.credit_type_id = ct.id
+            LEFT JOIN payments p ON l.id = p.loan_id
+            WHERE l.status = 'active'
+            GROUP BY l.id
+        `);
+
+        const today = new Date();
+        const exportData = [];
+
+        for (const loan of overdueLoans) {
+            const firstPayment = new Date(loan.first_payment_date);
+            const monthsSinceStart = Math.floor((today - firstPayment) / (1000 * 60 * 60 * 24 * 30));
+            const expectedPayments = Math.min(monthsSinceStart, loan.term_months);
+
+            // Ajuste: si monthsSinceStart < 0, esperado es 0 (no ha empezado a pagar)
+            const reallyExpected = Math.max(0, expectedPayments);
+
+            if (loan.actual_payments < reallyExpected) {
+                const balance = loan.amount - loan.paid_principal;
+                // Días atrazo aprox
+                const nextPaymentDate = new Date(firstPayment);
+                nextPaymentDate.setMonth(nextPaymentDate.getMonth() + loan.actual_payments);
+                const daysLate = Math.floor((today - nextPaymentDate) / (1000 * 60 * 60 * 24));
+
+                if (daysLate > 0) {
+                    exportData.push({
+                        loan_id: loan.id,
+                        client_name: loan.client_name,
+                        phone: loan.phone,
+                        credit_type: loan.credit_type,
+                        balance: balance,
+                        days_late: daysLate,
+                        missed_payments: reallyExpected - loan.actual_payments
+                    });
+                }
+            }
+        }
+
+        const columns = [
+            { key: 'loan_id', header: 'ID Préstamo' },
+            { key: 'client_name', header: 'Cliente' },
+            { key: 'phone', header: 'Teléfono' },
+            { key: 'credit_type', header: 'Tipo' },
+            { key: 'balance', header: 'Saldo Vencido', format: 'currency' },
+            { key: 'days_late', header: 'Días Atraso' },
+            { key: 'missed_payments', header: 'Cuotas Pendientes' }
+        ];
+
+        const csv = convertToCSV(exportData, columns);
+        res.header('Content-Type', 'text/csv');
+        res.header('Content-Disposition', `attachment; filename=reporte_mora_${new Date().toISOString().split('T')[0]}.csv`);
+        res.send(csv);
+
+    } catch (error) {
+        console.error('Error exportando mora:', error);
+        res.status(500).send('Error generando reporte');
+    }
+});
+
 module.exports = router;
