@@ -216,7 +216,8 @@ async function viewLoanDetails(id) {
                 <p><strong>Monto:</strong> $${loan.amount.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</p>
                 <p><strong>Tasa:</strong> ${loan.interest_rate}%</p>
                 <p><strong>Plazo:</strong> ${loan.term_months} meses</p>
-                <p><strong>Balance:</strong> $${loan.balance.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</p>
+                <p><strong>Balance Capital:</strong> $${loan.balance.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</p>
+                <p><strong>Interés Pendiente:</strong> $${loan.interestBalance.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</p>
               </div>
             </div>
 
@@ -264,17 +265,20 @@ async function viewLoanDetails(id) {
                 </thead>
                 <tbody>
                   ${schedule.map(item => `
-                    <tr style="${item.paid ? 'background: rgba(16, 185, 129, 0.1);' : ''}">
-                      <td>${item.payment_number}</td>
+                    <tr style="${item.status === 'PAID' ? 'background: rgba(16, 185, 129, 0.1);' :
+        item.status === 'PROJECTED' ? 'background: rgba(59, 130, 246, 0.1); font-style: italic;' :
+          item.status === 'PARTIAL' ? 'background: rgba(245, 158, 11, 0.1);' : ''}">
+                      <td>${item.is_projection ? '<em>(Proy.)</em>' : item.payment_number}</td>
                       <td>${new Date(item.due_date).toLocaleDateString('es-ES')}</td>
                       <td>$${item.payment_amount.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</td>
                       <td>$${item.principal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</td>
                       <td>$${item.interest.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</td>
                       <td>$${item.balance.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</td>
                       <td>
-                        ${item.paid ?
-        '<span class="badge badge-success">Pagado</span>' :
-        '<span class="badge badge-warning">Pendiente</span>'
+                        ${item.status === 'PAID' ? '<span class="badge badge-success">Pagado</span>' :
+        item.status === 'PARTIAL' ? '<span class="badge badge-warning">Parcial</span>' :
+          item.status === 'PROJECTED' ? '<span class="badge badge-info">Proyectado</span>' :
+            '<span class="badge badge-secondary">Pendiente</span>'
       }
                       </td>
                     </tr>

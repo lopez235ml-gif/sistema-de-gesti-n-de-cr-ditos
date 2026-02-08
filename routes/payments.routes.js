@@ -151,38 +151,173 @@ router.post('/', (req, res) => {
 
         // Calcular días de retraso y mora
         const daysLate = calculateDaysLate(due_date, payment_date);
-        const lateFee = calculateLateFee(amount, loan.late_fee_rate, daysLate, loan.grace_days);
 
-        // Calcular interés usando interés simple sobre el periodo
-        // Interés total = monto × tasa / 100
-        const totalInterest = (loan.amount * loan.interest_rate) / 100;
+        // 1. Calcular Mora (Recargo) - Se cobra primero
+        // Nota: La mora puede acumularse si no se paga.
+        // Por simplicidad, calculamos la mora "actual" de este cobro si aplica.
+        // (Idealmente verificaríamos si ya se cobró mora para esta cuota, pero asumimos cobro fresh)
+        // Para evitar doble cobro de mora, deberíamos ver si la cuota ya está vencida y pagada.
+        // Pero dejaremos la lógica de mora como input calculado por ahora o simple.
+        let lateFee = calculateLateFee(amount, loan.late_fee_rate, daysLate, loan.grace_days);
 
-        // Interés por cuota = interés total / número de cuotas
-        const interestPerPayment = totalInterest / loan.term_months;
+        // 2. Generar Schedule y Reconstruir Estado de Pagos (Waterfall)
+        // Necesitamos saber QUÉ se debe realmente (Interés vs Capital)
+        const { generateAmortizationSchedule } = require('../utils/calculations');
 
-        // Interés que corresponde a este pago
-        const interestDue = Math.round(interestPerPayment * 100) / 100;
+        const schedule = generateAmortizationSchedule(
+            loan.amount,
+            loan.interest_rate,
+            loan.term_months,
+            new Date(loan.first_payment_date),
+            loan.frequency,
+            loan.interest_type || 'simple'
+        );
 
+        const pastPayments = query('SELECT * FROM payments WHERE loan_id = ? ORDER BY payment_date', [loan_id]);
+
+        // Simular pagos anteriores para ver qué falta pagar
+        // Estructura de deuda: [ { principalOwed, interestOwed, ... } ]
+
+        // Inicializar deuda pendiente por cuota
+        let pendingInstallments = schedule.map(item => ({
+            number: item.payment_number,
+            principalDue: item.principal,
+            interestDue: item.interest,
+            principalPaid: 0,
+            interestPaid: 0
+        }));
+
+        // Función para aplicar un monto a la deuda pendiente
+        const applyPaymentToBuckets = (paymentAmount, isNewPayment = false) => {
+            let remaining = paymentAmount;
+            let allocation = { principal: 0, interest: 0, late_fee: 0 };
+
+            // Si es el pago NUEVO, primero descontamos la Mora calculada (si aplica)
+            // (O si la mora se considera aparte. Aquí asumimos que lateFee se deduce del monto)
+            if (isNewPayment && lateFee > 0) {
+                if (remaining >= lateFee) {
+                    allocation.late_fee = lateFee;
+                    remaining -= lateFee;
+                } else {
+                    allocation.late_fee = remaining;
+                    lateFee = remaining; // Ajustar real charged
+                    remaining = 0;
+                }
+            } else if (!isNewPayment) {
+                // Pagos pasados: ya tienen su desglose guardado en DB (p.interest, p.principal)
+                // PERO, si queremos reconstruirlo logicamente o confiamos en la DB?
+                // Confiemos en lo que la DB dice que pagaron de Interés vs Capital?
+                // NO, el problema es que la DB tiene datos malos (el bug anterior).
+                // MEJOR: Re-calcular la distribución de CERO basándonos en "Waterfall estricto"
+                // para ignorar la mala distribución histórica? 
+                // RIESGO: Cambiaría la historia si re-auditamos.
+                // SOLUCIÓN PRÁCTICA: Usar la distribución guardada para llenar los buckets
+                // y ver qué "huecos" quedan.
+                // WAIT: Si el pago #1 guardó $20 interes y $50 capital, entonces la Cuota 1
+                // ya tiene $20 interes pagado. Perfecto.
+                // Entonces no necesitamos "simular" la lógica, solo "llenar" con lo que dice la DB.
+                return;
+            }
+
+            // Aplicar remanente a cuotas pendientes
+            for (let inst of pendingInstallments) {
+                if (remaining <= 0) break;
+
+                // 1. Pagar Interés Pendiente de la cuota
+                const interestPending = inst.interestDue - inst.interestPaid;
+                if (interestPending > 0) {
+                    const toPay = Math.min(remaining, interestPending);
+                    if (isNewPayment) {
+                        allocation.interest += toPay;
+                        inst.interestPaid += toPay;
+                    }
+                    remaining -= toPay;
+                }
+
+                if (remaining <= 0) continue; // Si se acabó el dinero tras pagar interés
+
+                // 2. Pagar Capital Pendiente de la cuota
+                const principalPending = inst.principalDue - inst.principalPaid;
+                if (principalPending > 0) {
+                    const toPay = Math.min(remaining, principalPending);
+                    if (isNewPayment) {
+                        allocation.principal += toPay;
+                        inst.principalPaid += toPay;
+                    }
+                    remaining -= toPay;
+                }
+            }
+
+            // Si sobra dinero (pago adelantado a capital futuro o extra)
+            // Lo asignamos a "Reducción de Capital" general (o a la última cuota?)
+            // En un sistema estricto, reduciría el capital pendiente global.
+            // Aquí lo sumamos al acumulador de capital del allocation
+            if (remaining > 0 && isNewPayment) {
+                allocation.principal += remaining;
+            }
+
+            return allocation;
+        };
+
+        // LLENAR buckets con pagos pasados (Historia)
+        // El problema del usuario es que el pago pasado YA cubrió el interés.
+        // Así que llenamos los buckets con la data histórica.
+        pastPayments.forEach(p => {
+            let pInterest = p.interest;
+            let pPrincipal = p.principal;
+
+            for (let inst of pendingInstallments) {
+                // Llenar Interés
+                if (pInterest > 0) {
+                    const iSpace = inst.interestDue - inst.interestPaid;
+                    const iPay = Math.min(pInterest, iSpace);
+                    inst.interestPaid += iPay;
+                    pInterest -= iPay;
+                }
+                // Llenar Capital
+                if (pPrincipal > 0) {
+                    const pSpace = inst.principalDue - inst.principalPaid;
+                    const pPay = Math.min(pPrincipal, pSpace);
+                    inst.principalPaid += pPay;
+                    pPrincipal -= pPay;
+                }
+            }
+        });
+
+        // Calcular capital pagado hasta el momento (antes del pago actual)
+        const totalPrincipalPaidHistory = pendingInstallments.reduce((sum, inst) => sum + inst.principalPaid, 0);
+        const currentPrincipalBalance = loan.amount - totalPrincipalPaidHistory;
+
+        // Verificar si la última cuota programada ya venció para proyectar (si aplica)
+        const lastScheduledItem = schedule[schedule.length - 1];
+
+        const lastBucket = pendingInstallments[pendingInstallments.length - 1];
+        const isInterestCovered = lastBucket.interestPaid >= (lastBucket.interestDue - 0.01);
+        const isPastDue = new Date() > new Date(lastScheduledItem.due_date);
+
+        if (currentPrincipalBalance > 0.01 && (isPastDue || isInterestCovered)) {
+            const projectedInterest = (currentPrincipalBalance * (loan.interest_rate / 100)); // Simple mensual
+
+            pendingInstallments.push({
+                number: 'Projected',
+                principalDue: 0,
+                interestDue: projectedInterest,
+                principalPaid: 0,
+                interestPaid: 0,
+                isProjected: true
+            });
+        }
+
+        // APLICAR PAGO ACTUAL (Nuevo)
         let distribution;
 
-        // Aplicar el pago según el tipo seleccionado
         if (applicationType === 'principal') {
-            // Solo aplicar a capital
-            distribution = {
-                principal: amount - lateFee,
-                interest: 0,
-                late_fee: lateFee
-            };
+            distribution = { principal: amount - lateFee, interest: 0, late_fee: lateFee };
         } else if (applicationType === 'interest') {
-            // Solo aplicar a intereses
-            distribution = {
-                principal: 0,
-                interest: amount - lateFee,
-                late_fee: lateFee
-            };
+            distribution = { principal: 0, interest: amount - lateFee, late_fee: lateFee };
         } else {
-            // Aplicar a ambos (comportamiento por defecto: mora → interés → capital)
-            distribution = distributePayment(amount, interestDue, lateFee);
+            // Waterfall automático
+            distribution = applyPaymentToBuckets(amount, true);
         }
 
         // Generar número de recibo

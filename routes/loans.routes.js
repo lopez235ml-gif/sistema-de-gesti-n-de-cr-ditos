@@ -78,11 +78,65 @@ router.get('/:id', (req, res) => {
       ORDER BY payment_date DESC
     `, [req.params.id]);
 
-        // Calcular balance pendiente
-        const totalPaid = payments.reduce((sum, p) => sum + p.principal, 0);
-        const balance = loan.amount - totalPaid;
+        // Calcular balance pendiente (Capital)
+        const totalPrincipalPaid = payments.reduce((sum, p) => sum + p.principal, 0);
+        const balance = loan.amount - totalPrincipalPaid;
 
-        res.json({ ...loan, payments, balance });
+        // Calcular balance de intereses mediante proyección real (Schedule)
+        // Esto asegura consistencia con la tabla de amortización
+        const schedule = generateAmortizationSchedule(
+            loan.amount,
+            loan.interest_rate,
+            loan.term_months,
+            new Date(loan.first_payment_date),
+            loan.frequency,
+            loan.interest_type || 'simple'
+        );
+
+        let totalPaidAvailable = payments.reduce((sum, p) => sum + p.amount, 0);
+
+        let pendingInterestFromSchedule = 0;
+
+        // Simular waterfall sobre el schedule original
+        const scheduleWithStatus = schedule.map((item) => {
+            const amountDue = item.payment_amount;
+            const amountCovered = Math.min(amountDue, totalPaidAvailable);
+            totalPaidAvailable -= amountCovered;
+
+            // Lo que nos importa es cuánto interés QUEDA por pagar de esta cuota
+            // Desglosamos: payment_amount = principal + interest
+            // Si amountCovered < payment_amount, ¿qué se cubrió primero?
+            // Asumimos proporcional o interés primero?
+            // En 'distributePayment' (pagos reales) cobramos interés primero.
+            // Aquí en waterfall visual, si la cuota es parcial, asumimos que interés se pagó primero.
+
+            let interestPaidInRow = 0;
+            if (amountCovered >= item.interest) {
+                interestPaidInRow = item.interest;
+            } else {
+                interestPaidInRow = amountCovered;
+            }
+
+            pendingInterestFromSchedule += (item.interest - interestPaidInRow);
+
+            return { ...item, balance: amountDue - amountCovered, interestPaidInRow };
+        });
+
+        // Ver si necesitamos proyección extra (Misma lógica que GET /schedule)
+        const lastItem = scheduleWithStatus[scheduleWithStatus.length - 1];
+
+        // CORRECCIÓN: Solo proyectar si la fecha de vencimiento ya pasó O si interés cubierto
+        const isPastDue = new Date() > new Date(lastItem.due_date);
+        const isInterestCovered = (lastItem.interestPaidInRow || 0) >= (lastItem.interest - 0.01);
+
+        if (lastItem.balance > 0.01 && balance > 0.01 && (isPastDue || isInterestCovered)) {
+            const newInterest = (balance * (loan.interest_rate / 100));
+            pendingInterestFromSchedule += newInterest;
+        }
+
+        const interestBalance = Math.max(0, pendingInterestFromSchedule);
+
+        res.json({ ...loan, payments, balance, interestBalance });
     } catch (error) {
         console.error('Error obteniendo préstamo:', error);
         res.status(500).json({ error: 'Error en el servidor' });
@@ -93,7 +147,7 @@ router.get('/:id', (req, res) => {
 router.get('/:id/schedule', (req, res) => {
     try {
         const loan = get(`
-      SELECT l.*, ct.frequency
+      SELECT l.*, ct.frequency, ct.interest_type
       FROM loans l
       JOIN credit_types ct ON l.credit_type_id = ct.id
       WHERE l.id = ?
@@ -108,23 +162,82 @@ router.get('/:id/schedule', (req, res) => {
             loan.interest_rate,
             loan.term_months,
             new Date(loan.first_payment_date),
-            loan.frequency
+            loan.frequency,
+            loan.interest_type || 'simple' // Pasar el tipo de interés
         );
 
         // Obtener pagos realizados
         const payments = query('SELECT * FROM payments WHERE loan_id = ? ORDER BY payment_date', [req.params.id]);
 
-        // Marcar cuáles cuotas han sido pagadas
-        const scheduleWithStatus = schedule.map((item, index) => {
-            const payment = payments[index];
+        // Calcular total pagado para aplicar en cascada (Waterfall)
+        let totalPaidAvailable = payments.reduce((sum, p) => sum + p.amount, 0);
+
+        // Procesar la tabla de amortización original
+        const scheduleWithStatus = schedule.map((item) => {
+            const amountDue = item.payment_amount;
+            const amountCovered = Math.min(amountDue, totalPaidAvailable);
+
+            let interestPaidInRow = 0;
+            if (amountCovered >= item.interest) {
+                interestPaidInRow = item.interest;
+            } else {
+                interestPaidInRow = amountCovered;
+            }
+
+            totalPaidAvailable -= amountCovered;
+
+            // Determinar estado basado en cobertura
+            let status = 'PENDING';
+            if (amountCovered >= amountDue - 0.01) { // Tolerancia de centavos
+                status = 'PAID';
+            } else if (amountCovered > 0) {
+                status = 'PARTIAL';
+            }
+
             return {
                 ...item,
-                paid: !!payment,
-                payment_id: payment?.id,
-                actual_payment_date: payment?.payment_date,
-                actual_amount: payment?.amount
+                paid: status === 'PAID', // Mantener compatibilidad si algo usa booleano
+                status: status, // Nuevo campo explícito
+                amount_paid: amountCovered,
+                balance: amountDue - amountCovered,
+                interestPaidInRow
             };
         });
+
+        // Lógica de Re-amortización Automática (Extensión)
+        // ... (comentarios) ...
+
+        const lastItemInSchedule = scheduleWithStatus[scheduleWithStatus.length - 1];
+        const totalPrincipalPaid = payments.reduce((sum, p) => sum + p.principal, 0);
+        const realCapitalBalance = loan.amount - totalPrincipalPaid;
+
+        // CORRECCIÓN: Solo proyectar si la fecha de vencimiento ya pasó O si interés cubierto
+        const isPastDueSchedule = new Date() > new Date(lastItemInSchedule.due_date);
+        const isInterestCoveredSchedule = (lastItemInSchedule.interestPaidInRow || 0) >= (lastItemInSchedule.interest - 0.01);
+
+        if (lastItemInSchedule.balance > 0.01 && realCapitalBalance > 0.01 && (isPastDueSchedule || isInterestCoveredSchedule)) {
+            // ... (lógica de creación de cuota) ...
+            const nextDate = new Date(lastItemInSchedule.due_date);
+            if (loan.frequency === 'monthly') nextDate.setMonth(nextDate.getMonth() + 1);
+            else nextDate.setDate(nextDate.getDate() + 30); // Fallback
+
+            const newInterest = (realCapitalBalance * (loan.interest_rate / 100)); // Simple mensual
+
+            scheduleWithStatus.push({
+                payment_number: scheduleWithStatus.length + 1,
+                due_date: nextDate.toISOString().split('T')[0],
+                payment_amount: realCapitalBalance + newInterest,
+                principal: realCapitalBalance,
+                interest: newInterest,
+                balance: realCapitalBalance + newInterest, // Asumimos todo pendiente
+                status: 'PROJECTED', // Estado especial
+                paid: false,
+                amount_paid: 0,
+                is_projection: true // Flag para UI
+            });
+        }
+
+
 
         res.json(scheduleWithStatus);
     } catch (error) {

@@ -27,7 +27,7 @@ async function renderCreditTypes() {
                     <strong>Tasa de Interés:</strong> ${ct.interest_rate}%
                   </div>
                   <div class="mb-2">
-                    <strong>Tipo:</strong> ${ct.interest_type}
+                    <strong>Tipo:</strong> ${ct.interest_type === 'simple' ? 'Simple (Flat)' : 'Sobre Saldos'}
                   </div>
                   <div class="mb-2">
                     <strong>Frecuencia:</strong> ${ct.frequency}
@@ -83,8 +83,8 @@ function showCreditTypeModal(creditType = null) {
               <div class="form-group">
                 <label class="form-label">Tipo de Interés</label>
                 <select id="interest_type" class="form-select">
-                  <option value="simple" ${creditType?.interest_type === 'simple' ? 'selected' : ''}>Simple</option>
-                  <option value="compound" ${creditType?.interest_type === 'compound' ? 'selected' : ''}>Compuesto</option>
+                  <option value="simple" ${creditType?.interest_type === 'simple' ? 'selected' : ''}>Simple (Flat)</option>
+                  <option value="compound" ${creditType?.interest_type === 'compound' ? 'selected' : ''}>Sobre Saldos (Amortización Francesa)</option>
                 </select>
               </div>
               <div class="form-group">

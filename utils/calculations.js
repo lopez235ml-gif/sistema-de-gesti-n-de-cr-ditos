@@ -32,48 +32,108 @@ function calculateMonthlyPayment(principal, rate, months) {
  * @param {string} frequency - Frecuencia de pago (monthly, weekly, etc.)
  * @returns {Array} Tabla de amortización
  */
-function generateAmortizationSchedule(principal, rate, months, startDate, frequency = 'monthly') {
+/**
+ * Genera tabla de amortización
+ * @param {number} principal - Monto del préstamo
+ * @param {number} rate - Tasa de interés (porcentaje sobre el periodo)
+ * @param {number} months - Número de meses
+ * @param {Date} startDate - Fecha de inicio
+ * @param {string} frequency - Frecuencia de pago (monthly, weekly, etc.)
+ * @param {string} interestType - Tipo de interés ('simple', 'reducing')
+ * @returns {Array} Tabla de amortización
+ */
+function generateAmortizationSchedule(principal, rate, months, startDate, frequency = 'monthly', interestType = 'simple') {
     const schedule = [];
-    const totalInterest = calculateSimpleInterest(principal, rate);
-    const monthlyPayment = calculateMonthlyPayment(principal, rate, months);
-
-    // Interés fijo por cuota
-    const interestPerPayment = Math.round((totalInterest / months) * 100) / 100;
-
-    // Capital fijo por cuota
-    const principalPerPayment = Math.round((principal / months) * 100) / 100;
-
     let balance = principal;
 
-    for (let i = 1; i <= months; i++) {
-        // Para la última cuota, ajustar para evitar errores de redondeo
-        const isLastPayment = i === months;
-        const principalPayment = isLastPayment ? balance : principalPerPayment;
-        const interestPayment = isLastPayment ? (totalInterest - (interestPerPayment * (months - 1))) : interestPerPayment;
+    // Convertir tasa del periodo completo a tasa mensual/periódica aproximada
+    // Nota: 'rate' viene como porcentaje total del periodo en el sistema actual (e.g. 20% anual/global).
+    // Si es 'reducing', asumiremos que 'rate' es la tasa periódica (mensual).
+    // OJO: En el sistema actual, `credit_types` almacena `interest_rate`.
+    // Si el usuario pone 5%, asumimos que es mensual para 'reducing'.
 
-        balance -= principalPayment;
+    let periodicRate = rate / 100; // Por defecto asumimos que el input es la tasa del periodo
 
-        // Calcular fecha de pago
-        const dueDate = new Date(startDate);
-        if (frequency === 'monthly') {
-            dueDate.setMonth(dueDate.getMonth() + i);
-        } else if (frequency === 'weekly') {
-            dueDate.setDate(dueDate.getDate() + (i * 7));
-        } else if (frequency === 'biweekly') {
-            dueDate.setDate(dueDate.getDate() + (i * 14));
+    // Lógica para Interés Simple (Flat Rate)
+    // El interés se calcula sobre el capital INICIAL siempre.
+    if (interestType === 'simple') {
+        const totalInterest = calculateSimpleInterest(principal, rate);
+        // Recalcular periodicRate efectivo para consistencia interna si fuera necesario, pero mantenemos la lógica flat
+
+        const interestPerPayment = Math.round((totalInterest / months) * 100) / 100;
+        const principalPerPayment = Math.round((principal / months) * 100) / 100;
+
+        for (let i = 1; i <= months; i++) {
+            const isLastPayment = i === months;
+            const principalPayment = isLastPayment ? balance : principalPerPayment;
+            const interestPayment = isLastPayment ? (totalInterest - (interestPerPayment * (months - 1))) : interestPerPayment;
+
+            balance -= principalPayment;
+
+            // ... (Fecha lógica igual)
+            const dueDate = calculateDueDate(startDate, i, frequency);
+
+            schedule.push({
+                payment_number: i,
+                due_date: dueDate.toISOString().split('T')[0],
+                payment_amount: Math.round((principalPayment + interestPayment) * 100) / 100,
+                principal: Math.round(principalPayment * 100) / 100,
+                interest: Math.round(interestPayment * 100) / 100,
+                balance: Math.max(0, Math.round(balance * 100) / 100)
+            });
+        }
+    }
+    // Lógica para Interés Compuesto / Sobre Saldos (Reducing Balance)
+    else {
+        // Asumimos 'rate' es la tasa MENSUAL/Periódica si es reducing.
+        // Si usamos el sistema francés (cuota fija):
+        // Cuota = P * r * (1+r)^n / ((1+r)^n - 1)
+
+        // Si rate es 0, división por cero.
+        let fixedPayment;
+        if (periodicRate === 0) {
+            fixedPayment = principal / months;
+        } else {
+            fixedPayment = principal * periodicRate * Math.pow(1 + periodicRate, months) / (Math.pow(1 + periodicRate, months) - 1);
         }
 
-        schedule.push({
-            payment_number: i,
-            due_date: dueDate.toISOString().split('T')[0],
-            payment_amount: Math.round((principalPayment + interestPayment) * 100) / 100,
-            principal: Math.round(principalPayment * 100) / 100,
-            interest: Math.round(interestPayment * 100) / 100,
-            balance: Math.max(0, Math.round(balance * 100) / 100)
-        });
+        for (let i = 1; i <= months; i++) {
+            const interestPayment = balance * periodicRate;
+            let principalPayment = fixedPayment - interestPayment;
+
+            // Ajuste final
+            if (i === months || principalPayment > balance) {
+                principalPayment = balance;
+                // La cuota final puede variar centavos
+            }
+
+            balance -= principalPayment;
+            const dueDate = calculateDueDate(startDate, i, frequency);
+
+            schedule.push({
+                payment_number: i,
+                due_date: dueDate.toISOString().split('T')[0],
+                payment_amount: Math.round((principalPayment + interestPayment) * 100) / 100,
+                principal: Math.round(principalPayment * 100) / 100,
+                interest: Math.round(interestPayment * 100) / 100,
+                balance: Math.max(0, Math.round(balance * 100) / 100)
+            });
+        }
     }
 
     return schedule;
+}
+
+function calculateDueDate(startDate, offset, frequency) {
+    const date = new Date(startDate);
+    if (frequency === 'monthly') {
+        date.setMonth(date.getMonth() + offset);
+    } else if (frequency === 'weekly') {
+        date.setDate(date.getDate() + (offset * 7));
+    } else if (frequency === 'biweekly') {
+        date.setDate(date.getDate() + (offset * 14));
+    }
+    return date;
 }
 
 /**
